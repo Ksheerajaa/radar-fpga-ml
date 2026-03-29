@@ -1,35 +1,42 @@
-import torch
-import os
 import numpy as np
+from tensorflow.keras.models import load_model
+import os
 
-# Get project root directory
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+# Get absolute base directory
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 
-# Paths
-MODEL_PATH = os.path.join(PROJECT_ROOT, "model", "trained_model", "model.pth")
-WEIGHTS_DIR = os.path.join(PROJECT_ROOT, "weights")
-
-# Make sure weights directory exists
-os.makedirs(WEIGHTS_DIR, exist_ok=True)
-
-# Load model
-model = torch.load(MODEL_PATH, map_location="cpu")
+MODEL_PATH = os.path.join(BASE_DIR, "model_versions/v1_current/jamshield_model.h5")
+OUTPUT_DIR = os.path.join(BASE_DIR, "model_versions/v2_fpga/")
 
 
-def export_weights(tensor, filename):
 
-    weights = tensor.detach().numpy().flatten()
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    filepath = os.path.join(WEIGHTS_DIR, filename)
+print("Loading model from:", MODEL_PATH)
 
-    with open(filepath, "w") as f:
-        for w in weights:
-            f.write(f"{w}\n")
+model = load_model(MODEL_PATH)
+weights = model.get_weights()
 
+print("Total weight tensors:", len(weights))
 
-export_weights(model["conv1.weight"], "W1.txt")
-export_weights(model["conv1.bias"], "B1.txt")
-export_weights(model["fc.weight"], "W2.txt")
-export_weights(model["fc.bias"], "B2.txt")
+# Save numpy weights
+np.save(os.path.join(OUTPUT_DIR, "model_weights.npy"),
+        np.array(weights, dtype=object),
+        allow_pickle=True)
 
-print("Weights exported")
+# Save flattened weights
+layer_id = 0
+
+for i, w in enumerate(weights):
+    filename = os.path.join(OUTPUT_DIR, f"W{i}.txt")
+
+    if len(w.shape) == 1:
+        # Bias
+        np.savetxt(filename, w)
+    else:
+        # Weights (flatten)
+        np.savetxt(filename, w.flatten())
+
+    print(f"Saved: {filename}")
+
+print("\n✅ All weights exported successfully!")

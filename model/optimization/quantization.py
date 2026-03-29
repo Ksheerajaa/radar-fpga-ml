@@ -1,83 +1,43 @@
-import torch
 import numpy as np
 import os
-import sys
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
-sys.path.append(PROJECT_ROOT)
+# Base path fix (IMPORTANT)
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 
+INPUT_DIR = os.path.join(BASE_DIR, "model_versions/v2_fpga/")
+OUTPUT_DIR = os.path.join(BASE_DIR, "weights/")
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, "quantized_weights.mem")
 
-from model.architecture.cnn1d_model import RF_CNN
-
-# Paths
-MODEL_PATH = "model/trained_model/model.pth"
-OUTPUT_DIR = "weights"
-
+# Create weights folder if not present
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-print("Loading trained model...")
+SCALE = 256
 
-# Create model
-model = RF_CNN()
+files = sorted([f for f in os.listdir(INPUT_DIR) if f.endswith(".txt")])
 
-# Load trained weights
-model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
-model.eval()
+quantized = []
 
-print("Model loaded successfully")
+print("Files found:", files)
 
+for file in files:
+    path = os.path.join(INPUT_DIR, file)
 
-# -------- INT8 Quantization -------- #
+    data = np.loadtxt(path)
 
-def quantize_tensor(tensor):
+    # Ensure array
+    data = np.array(data).flatten()
 
-    max_val = torch.max(torch.abs(tensor))
+    # Quantize
+    q = np.round(data * SCALE).astype(int)
 
-    scale = max_val / 127
+    quantized.extend(q.tolist())
 
-    quantized = torch.round(tensor / scale).to(torch.int8)
+# ===== WRITE .mem FILE =====
+os.makedirs("../weights", exist_ok=True)
 
-    return quantized.numpy(), scale
+with open(OUTPUT_FILE, "w") as f:
+    for val in quantized:
+        # 16-bit hex format
+        f.write(f"{val & 0xFFFF:04x}\n")
 
-
-print("Quantizing weights...")
-
-quantized_weights = {}
-scales = {}
-
-for name, param in model.state_dict().items():
-
-    q_weight, scale = quantize_tensor(param)
-
-    quantized_weights[name] = q_weight
-    scales[name] = scale
-
-    print(f"Quantized {name} | shape {q_weight.shape}")
-
-
-# -------- Save numpy weights -------- #
-
-np.save(
-    os.path.join(OUTPUT_DIR, "model_weights.npy"),
-    quantized_weights
-)
-
-print("Saved model_weights.npy")
-
-
-# -------- Save FPGA memory file -------- #
-
-mem_file = os.path.join(OUTPUT_DIR, "quantized_weights.mem")
-
-with open(mem_file, "w") as f:
-
-    for layer in quantized_weights:
-
-        weights = quantized_weights[layer].flatten()
-
-        for w in weights:
-            f.write(f"{int(w)}\n")
-
-print("Saved quantized_weights.mem")
-
-print("Quantization complete")
+print("\n✅ Quantized weights saved to:", OUTPUT_FILE)
